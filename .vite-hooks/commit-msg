@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+frontend/node_modules/.bin/commitlint --default-config --edit "$1"

@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+if printf '%s\n' "$staged" | grep -q '^frontend/'; then
+  if [ -f frontend/node_modules/.bin/vp ]; then
+    (cd frontend && ./node_modules/.bin/vp staged --relative)
+  else
+    echo "skip frontend checks: run pnpm -C frontend install first" >&2
+  fi
+fi
+
+py=$(printf '%s\n' "$staged" | grep '^backend/.*\.py$' | sed 's|^backend/||' || true)
+if [ -n "$py" ]; then
+  (cd backend && printf '%s\n' "$py" | xargs uv run ruff format)
+  (cd backend && printf '%s\n' "$py" | xargs uv run ruff check --fix)
+  printf '%s\n' "$py" | xargs -I{} git add "backend/{}"
+fi
+
+rs=$(printf '%s\n' "$staged" | grep '^client/src-tauri/.*\.rs$' || true)
+if [ -n "$rs" ]; then
+  (cd client/src-tauri && cargo fmt)
+  printf '%s\n' "$rs" | xargs -I{} git add "{}"
+fi
+
+bad=0
+text=$(git diff --cached --name-only --diff-filter=ACMR | grep -Ev '\.(png|ico|icns|jpg|jpeg|gif|webp|woff2?|ttf|zip)$|(^|/)(Cargo\.lock|uv\.lock|pnpm-lock\.yaml)$|^client/src-tauri/icons/' || true)
+for f in $text; do
+  [ -f "$f" ] || continue
+  if [ -n "$(tail -c 1 "$f")" ]; then
+    echo "missing final newline: $f" >&2
+    bad=1
+  fi
+  if [ "$(tr -d '\r' < "$f" | wc -c)" != "$(wc -c < "$f")" ]; then
+    echo "CRLF line ending: $f" >&2
+    bad=1
+  fi
+  case "$f" in
+    *.md) ;;
+    *)
+      if grep -qE '[[:blank:]]+$' "$f"; then
+        echo "trailing whitespace: $f" >&2
+        bad=1
+      fi
+      ;;
+  esac
+done
+exit $bad

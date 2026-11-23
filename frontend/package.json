@@ -6,9 +6,16 @@
   "scripts": {
     "dev": "vp dev",
     "build": "tsc && vp build",
-    "preview": "vp preview"
+    "preview": "vp preview",
+    "stylelint": "stylelint \"src/**/*.css\"",
+    "stylelint:fix": "stylelint \"src/**/*.css\" --fix",
+    "prepare": "vp hooks enable"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "stylelint": "^18.1.0",
+    "stylelint-config-recess-order": "^7.10.1",
+    "stylelint-config-standard": "^41.1.0",
     "typescript": "~7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
@@ -19,5 +26,8 @@
       "version": "12.21.0",
       "onFail": "download"
     }
+  },
+  "engines": {
+    "node": ">=26"
   }
 }

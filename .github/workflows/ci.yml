@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Hygiene (newline / CRLF / trailing whitespace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check text file hygiene
+        run: |
+          bad=0
+          for f in $(git ls-files); do
+            case "$f" in
+              *.png|*.ico|*.icns|*.jpg|*.jpeg|*.gif|*.webp|*.woff|*.woff2|*.ttf|*.zip) continue ;;
+              Cargo.lock|*/Cargo.lock|uv.lock|*/uv.lock|*/pnpm-lock.yaml) continue ;;
+              client/src-tauri/icons/*) continue ;;
+            esac
+            if [ -n "$(tail -c 1 "$f")" ]; then
+              echo "missing final newline: $f"
+              bad=1
+            fi
+            if [ "$(tr -d '\r' < "$f" | wc -c)" != "$(wc -c < "$f")" ]; then
+              echo "CRLF line ending: $f"
+              bad=1
+            fi
+            case "$f" in
+              *.md) ;;
+              *)
+                if grep -qE '[[:blank:]]+$' "$f"; then
+                  echo "trailing whitespace: $f"
+                  bad=1
+                fi
+                ;;
+            esac
+          done
+          exit $bad
+
+  frontend:
+    name: Frontend (format / lint / css / type / build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Verify client lockfile
+        working-directory: client
+        run: pnpm install --frozen-lockfile
+      - run: pnpm exec vp check
+      - run: pnpm exec stylelint "src/**/*.css"
+      - run: pnpm exec vp build
+
+  backend:
+    name: Backend (ruff / mypy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.8"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+
+  tauri:
+    name: Tauri (fmt / clippy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client/src-tauri
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test
